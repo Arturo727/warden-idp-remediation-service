@@ -74,7 +74,7 @@ class HistoryService:
                     "decision": decision.action if decision else None,
                     "confidence": decision.confidence if decision else None,
                     "auto_or_approval": (
-                        "auto" if execution and execution.executor_type == "auto"
+                        "auto" if execution and execution.executor_type in {"auto", "auto_execute_handler"}
                         else "approval_required" if approval else None
                     ),
                     "approval_status": approval.status if approval else None,

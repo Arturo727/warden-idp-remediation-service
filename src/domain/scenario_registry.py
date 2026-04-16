@@ -1,3 +1,10 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from src.domain.enums import Action
+from src.domain.schemas import DecisionOut, EventIn
+
 PREDEFINED_SCENARIOS = [
     {
         "id": "scenario-auto-restart-qa",
@@ -95,3 +102,139 @@ PREDEFINED_SCENARIOS = [
 SCENARIO_CATALOG = {
     (s["project_id"], s["environment_id"], s["severity"], s["signal"]) for s in PREDEFINED_SCENARIOS
 }
+
+
+def find_matching_scenario(event: EventIn) -> Optional[dict[str, Any]]:
+    """Best-effort deterministic match for preconfigured scenarios.
+
+    Priority:
+    1. ui_scenario exact name match coming from frontend
+    2. exact payload identity (project/environment/severity/signal)
+    3. workload_id match when the scenario context defines it
+    """
+    ctx = event.context if isinstance(event.context, dict) else {}
+    ui_scenario = str(ctx.get("ui_scenario", "")).strip().lower()
+    workload_id = str(ctx.get("workload_id", "")).strip().lower()
+    severity = str(getattr(event.severity, "value", event.severity)).strip().lower()
+
+    if ui_scenario:
+        for scenario in PREDEFINED_SCENARIOS:
+            if scenario["name"].strip().lower() == ui_scenario:
+                return scenario
+
+    for scenario in PREDEFINED_SCENARIOS:
+        if (
+            scenario["project_id"] == event.project_id
+            and scenario["environment_id"] == event.environment_id
+            and str(scenario["severity"]).lower() == severity
+            and scenario["signal"] == event.signal
+        ):
+            return scenario
+
+    if workload_id:
+        for scenario in PREDEFINED_SCENARIOS:
+            scenario_workload = str(scenario.get("context", {}).get("workload_id", "")).strip().lower()
+            if scenario_workload and scenario_workload == workload_id:
+                return scenario
+
+    return None
+
+
+def scenario_forced_decision(scenario: dict[str, Any]) -> tuple[DecisionOut, str]:
+    sid = scenario.get("id")
+
+    if sid == "scenario-auto-restart-qa":
+        return (
+            DecisionOut(
+                action=Action.restart,
+                confidence=0.95,
+                reasoning="Escenario preconfigurado: reinicio automático por OOM en QA.",
+                safe_to_auto=True,
+            ),
+            "scenario_preconfigured_override",
+        )
+    if sid == "scenario-prod-rollback-approval":
+        return (
+            DecisionOut(
+                action=Action.rollback,
+                confidence=0.95,
+                reasoning="Escenario preconfigurado: rollback en producción requiere aprobación.",
+                safe_to_auto=False,
+            ),
+            "scenario_preconfigured_override",
+        )
+    if sid == "scenario-cpu-scale-prod":
+        return (
+            DecisionOut(
+                action=Action.scale_up,
+                confidence=0.91,
+                reasoning="Escenario preconfigurado: scale_up en producción requiere aprobación.",
+                safe_to_auto=False,
+            ),
+            "scenario_preconfigured_override",
+        )
+    if sid == "scenario-explicit-notify-human":
+        return (
+            DecisionOut(
+                action=Action.notify_human,
+                confidence=0.72,
+                reasoning="Escenario preconfigurado: incidente ambiguo debe escalarse a humano.",
+                safe_to_auto=False,
+            ),
+            "scenario_preconfigured_override",
+        )
+    if sid == "scenario-no-action-info":
+        return (
+            DecisionOut(
+                action=Action.no_action,
+                confidence=0.97,
+                reasoning="Escenario preconfigurado: evento informativo sin remediación activa.",
+                safe_to_auto=True,
+            ),
+            "scenario_preconfigured_override",
+        )
+    if sid == "scenario-critical-never-auto":
+        return (
+            DecisionOut(
+                action=Action.notify_human,
+                confidence=0.89,
+                reasoning="Escenario preconfigurado: severidad critical nunca debe autoejecutarse.",
+                safe_to_auto=False,
+            ),
+            "scenario_preconfigured_override",
+        )
+    if sid == "scenario-low-confidence":
+        return (
+            DecisionOut(
+                action=Action.notify_human,
+                confidence=0.55,
+                reasoning="Escenario preconfigurado: baja confianza obliga a escalar a humano.",
+                safe_to_auto=False,
+            ),
+            "scenario_preconfigured_override",
+        )
+
+    # Fallback by category if a new scenario is later added
+    category = str(scenario.get("category", "")).strip().lower()
+    if category in {a.value for a in Action}:
+        action = Action(category)
+        safe = action not in {Action.rollback, Action.scale_up, Action.notify_human}
+        return (
+            DecisionOut(
+                action=action,
+                confidence=0.8,
+                reasoning="Escenario preconfigurado aplicado por categoría.",
+                safe_to_auto=safe,
+            ),
+            "scenario_category_override",
+        )
+
+    return (
+        DecisionOut(
+            action=Action.notify_human,
+            confidence=0.55,
+            reasoning="Escenario no reconocido; se escala a humano por seguridad.",
+            safe_to_auto=False,
+        ),
+        "scenario_fallback_override",
+    )
