@@ -1,4 +1,5 @@
 import logging
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.clients.llm_client import LLMClient
 from src.config import settings
@@ -12,8 +13,10 @@ class ReasoningService:
     def __init__(self) -> None:
         self.llm = LLMClient()
 
-    def reason(self, event: EventIn, history: list[dict]) -> tuple[DecisionOut, bool, list[str]]:
-        decision = self.llm.decide(event, history)
+    def reason(
+        self, event: EventIn, history: list[dict]
+    ) -> Tuple[DecisionOut, bool, List[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]], str, Optional[str]]:
+        decision, llm_prompt, llm_response, llm_provider, llm_error = self.llm.decide(event, history)
         final_safe, restrictions = apply_safety_rules(event, decision, settings.confidence_threshold)
 
         logger.info(
@@ -27,6 +30,8 @@ class ReasoningService:
                 "final_safe_to_auto": final_safe,
                 "history_size": len(history),
                 "restrictions": restrictions,
+                "llm_provider": llm_provider,
+                "llm_error": llm_error,
             },
         )
-        return decision, final_safe, restrictions
+        return decision, final_safe, restrictions, llm_prompt, llm_response, llm_provider, llm_error

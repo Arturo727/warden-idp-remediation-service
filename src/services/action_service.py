@@ -2,7 +2,6 @@ import logging
 
 from src.clients.notifier_client import NotifierClient
 from src.clients.orchestrator_client import OrchestratorClient
-from src.domain.enums import Action
 
 logger = logging.getLogger(__name__)
 
@@ -14,19 +13,37 @@ class ActionService:
 
     def execute(self, action: str, project_id: str, environment_id: str) -> dict:
         logger.info(
-            "executing_action",
+            "action_execute_requested",
             extra={"action": action, "project_id": project_id, "environment_id": environment_id},
         )
 
-        if action == Action.rollback.value:
-            return self.orchestrator.rollback(project_id, environment_id)
-        if action == Action.restart.value:
-            return self.orchestrator.restart(project_id, environment_id)
-        if action == Action.scale_up.value:
-            return self.orchestrator.scale_up(project_id, environment_id)
-        if action == Action.notify_human.value:
-            return self.notifier.send({"message": f"Manual intervention required for {project_id} in {environment_id}"})
-        if action == Action.no_action.value:
-            return {"status": "recorded", "message": "No action executed"}
+        if action == "rollback":
+            result = self.orchestrator.rollback(project_id, environment_id)
+        elif action == "restart":
+            result = self.orchestrator.restart(project_id, environment_id)
+        elif action == "scale_up":
+            result = self.orchestrator.scale_up(project_id, environment_id)
+        elif action == "notify_human":
+            result = self.notifier.send(
+                {
+                    "message": f"Manual intervention required for {project_id} in {environment_id}",
+                    "project_id": project_id,
+                    "environment_id": environment_id,
+                }
+            )
+        elif action == "no_action":
+            result = {
+                "api_name": "no_action",
+                "endpoint": None,
+                "request": {"project_id": project_id, "environment_id": environment_id},
+                "response": {"status": "skipped", "action": "no_action"},
+                "status": "skipped",
+            }
+        else:
+            raise ValueError(f"unsupported action '{action}'")
 
-        raise ValueError(f"unsupported action: {action}")
+        logger.info(
+            "action_execute_result",
+            extra={"action": action, "project_id": project_id, "environment_id": environment_id, "result": result},
+        )
+        return result

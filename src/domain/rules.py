@@ -1,22 +1,25 @@
-from src.domain.enums import Action, Severity
 from src.domain.schemas import DecisionOut, EventIn
 
 
-def apply_safety_rules(event: EventIn, decision: DecisionOut, threshold: float) -> tuple[bool, list[str]]:
-    reasons: list[str] = []
-    final_safe = decision.safe_to_auto
+def apply_safety_rules(event: EventIn, decision: DecisionOut, confidence_threshold: float) -> tuple[bool, list[str]]:
+    restrictions: list[str] = []
+    final_safe = bool(decision.safe_to_auto)
 
-    if event.severity == Severity.critical:
+    severity = str(getattr(event.severity, "value", event.severity)).lower()
+    environment = str(event.environment_id).lower()
+    action = str(getattr(decision.action, "value", decision.action)).lower()
+    confidence = float(decision.confidence)
+
+    if severity == "critical":
         final_safe = False
-        reasons.append("severity=critical => safe_to_auto=false")
+        restrictions.append("severity=critical => safe_to_auto=false")
 
-    if decision.confidence < threshold:
+    if confidence < float(confidence_threshold):
         final_safe = False
-        reasons.append(f"confidence<{threshold} => safe_to_auto=false")
+        restrictions.append(f"confidence<{confidence_threshold} => safe_to_auto=false")
 
-    is_prod = event.environment_id.lower() in {"prod", "production"}
-    if is_prod and decision.action in {Action.rollback, Action.scale_up}:
+    if environment in {"prod", "production"} and action in {"rollback", "scale_up"}:
         final_safe = False
-        reasons.append("prod + rollback/scale_up => safe_to_auto=false")
+        restrictions.append("prod + rollback/scale_up => safe_to_auto=false")
 
-    return final_safe, reasons
+    return final_safe, restrictions

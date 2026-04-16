@@ -15,4 +15,8 @@ class DecisionModel(Base):
     llm_safe_to_auto = Column(Boolean, nullable=False)
     final_safe_to_auto = Column(Boolean, nullable=False)
     restrictions_applied_json = Column(Text, nullable=False, default="[]")
+    llm_prompt_json = Column(Text, nullable=True)
+    llm_response_json = Column(Text, nullable=True)
+    llm_provider = Column(String, nullable=True)
+    llm_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -1,187 +1,128 @@
-# Warden
+# Warden Bundle v7 — Atomic Scenario Selection
 
-Warden is an internal IDP service that receives degradation events from observability platforms, reasons about them with an LLM, applies deterministic safety guardrails, and either executes a remediation or routes the case to human approval.
+Correcciones clave:
+- Los 7 escenarios precargados ahora usan `workload_id` únicos para evitar contaminación de historial entre escenarios de prueba.
+- El backend mantiene los guardrails:
+  - critical => approval
+  - confidence < 0.7 => approval
+  - prod + rollback/scale_up => approval
+- Si `final_safe_to_auto=false`, nunca ejecuta directo.
+- `GET /preconfigured-scenarios` devuelve los 7 escenarios completos.
 
-This implementation is designed for the technical assessment and focuses on:
-- clear separation of concerns
-- deterministic policy enforcement over LLM output
-- human-in-the-loop approvals
-- local execution with Docker Compose
-- automated tests for the main flows
 
-## High-level flow
+## Tests automatizados
 
-1. Observability sends a webhook event to `POST /webhooks/events`.
-2. Warden validates and stores the event.
-3. Warden retrieves the latest N historical events for the same workload scope.
-4. Warden asks the LLM for a structured recommendation.
-5. Warden applies deterministic safety rules:
-   - `critical` severity always disables auto-execution
-   - confidence below threshold disables auto-execution
-   - `prod` + `rollback` or `scale_up` disables auto-execution
-6. If auto-execution is allowed, Warden invokes the mocked platform orchestrator.
-7. Otherwise, Warden creates an approval request and notifies the mocked on-call channel.
-8. Human approval or rejection is stored as feedback for future reasoning.
+El proyecto incluye tests unitarios y de integración para cubrir los flujos principales solicitados:
 
-## Architecture
+- **Validación del payload**
+  - campos requeridos
+  - severidad inválida
+  - validación contra catálogo
+  - validación de URLs en `context`
+- **Aplicación de restricciones (`safe_to_auto`)**
+  - `severity=critical` fuerza `safe_to_auto=false`
+  - `confidence < 0.7` fuerza `safe_to_auto=false`
+  - `prod + rollback/scale_up` fuerza `safe_to_auto=false`
+- **Ejecución / mock de acciones**
+  - ejecución automática de `restart`
+  - creación de approval + notificación para `rollback` en prod
+  - uso de mocks para orquestador / notificador
+- **Cobertura usando los 7 escenarios preconfigurados**
+  - restart
+  - rollback
+  - scale_up
+  - notify_human
+  - no_action
+  - critical
+  - baja confianza
 
-```text
-Observability Webhook
-        |
-        v
-   FastAPI API
-        |
-        v
-   Event Service
-   |          |
-   |          +--> History Service --> SQLite
-   |
-   +--> Reasoning Service --> LLM Client (mock or Groq)
-   |
-   +--> Safety Rules / Guardrails
-   |
-   +--> Action Service
-            |               |
-            v               v
-   Mock Orchestrator   Mock Notifier
-```
+### Cómo correr los tests
 
-## Tech stack
-
-- Python 3.12
-- FastAPI
-- SQLAlchemy
-- SQLite
-- Docker / Docker Compose
-- Pytest
-- Optional Groq integration via API key
-
-## Project structure
-
-```text
-warden_final/
-├── README.md
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── .env.example
-├── .gitignore
-├── src/
-├── mocks/
-└── tests/
-```
-
-## Run locally
+Desde `backend/`:
 
 ```bash
-cp .env.example .env
-docker compose up --build
-```
-
-Service endpoints:
-- Warden: `http://localhost:8000`
-- Mock orchestrator: `http://localhost:8001`
-- Mock notifier: `http://localhost:8002`
-
-## API
-
-- `GET /health`
-- `POST /webhooks/events`
-- `GET /events`
-- `GET /events/{id}`
-- `GET /approvals`
-- `POST /approvals/{id}/approve`
-- `POST /approvals/{id}/reject`
-
-## Example request
-
-```bash
-curl -X POST http://localhost:8000/webhooks/events \
-  -H "Content-Type: application/json" \
-  -d '{
-    "project_id": "payments-api",
-    "environment_id": "prod",
-    "severity": "high",
-    "signal": "P99 latency spiked to 4s after the 14:30 deploy",
-    "context": {
-      "last_deploy": "v2.3.1",
-      "cpu_usage": "85%",
-      "error_rate": "12%",
-      "workload_id": "payments-api"
-    },
-    "timestamp": "2024-04-03T14:45:00Z"
-  }'
-```
-
-## Example approval
-
-```bash
-curl -X POST http://localhost:8000/approvals/1/approve \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resolved_by": "human-on-call",
-    "resolution_note": "Approved after reviewing the incident context"
-  }'
-```
-
-## Tests
-
-Local:
-```bash
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 pytest -q
 ```
 
-With coverage:
+Con cobertura:
+
 ```bash
 pytest --cov=src --cov-report=term-missing
 ```
 
-## Configuration
+### Archivos de test relevantes
 
-Environment variables:
+- `tests/test_payload_validation.py`
+- `tests/test_rules.py`
+- `tests/test_action_execution.py`
+- `tests/test_event_flow.py`
+- `tests/test_preconfigured_scenarios_matrix.py`
 
-- `APP_NAME`
-- `APP_ENV`
-- `APP_PORT`
-- `DATABASE_URL`
-- `LLM_MODE` → `mock` or `groq`
-- `GROQ_API_KEY`
-- `GROQ_MODEL`
-- `HISTORY_LIMIT`
-- `CONFIDENCE_THRESHOLD`
-- `ORCHESTRATOR_URL`
-- `NOTIFIER_URL`
 
-## Design decisions
+## Compatibilidad de Python
 
-### 1. LLM output is advisory, not authoritative
-The LLM proposes a remediation, but Warden always applies deterministic rules before auto-executing any action.
+Esta versión fue ajustada para ser compatible con **Python 3.9+**.
 
-### 2. History is included before reasoning
-Warden enriches the prompt with the latest N events for the same workload scope so the LLM can see prior signals, decisions, and human feedback.
+Si estás en macOS y `python` no existe, usa:
 
-### 3. Human approval is persisted
-Approval requests remain stored until they are approved or rejected. Their outcome is later visible to the LLM as feedback context.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+python3 -m pytest -q
+```
 
-### 4. External systems are mocked
-The platform orchestrator and notifier are intentionally mocked because the exercise explicitly requires it.
 
-### 5. Simple persistence for local execution
-SQLite was chosen to keep the project easy to run with a single command while still preserving approvals, events, decisions, executions, and feedback.
+## Tests automatizados
 
-## Assumptions
+Los tests fueron ajustados para **mockear únicamente las dependencias externas durante la ejecución de pytest**:
 
-- The contract does not expose a first-class `workload_id`. For that reason, the history scope uses `project_id + environment_id`, with optional support for `context.workload_id`.
-- Processing is synchronous in this assessment implementation to keep the flow simple and easy to validate locally.
-- Authentication is out of scope for the exercise.
+- LLM (`LLMClient.decide`)
+- Orchestrator (`restart`, `rollback`, `scale_up`)
+- Notifier (`send`)
 
-## Possible next improvements
+Esto permite validar los flujos principales sin cambiar el comportamiento real del backend fuera de los tests.
 
-- asynchronous processing with a queue
-- idempotency keys for duplicate webhook events
-- authentication / request signing for inbound webhooks
-- OpenTelemetry tracing
-- PostgreSQL for multi-user scenarios
-- richer policy engine for safety constraints
-- real Slack / PagerDuty / orchestrator integrations
+### Cobertura incluida
+
+- **Validación del payload**
+  - campo requerido faltante
+  - severidad inválida
+  - contexto inválido
+  - URLs inválidas en `context`
+- **Aplicación de restricciones (`safe_to_auto`)**
+  - `severity=critical`
+  - `confidence < 0.7`
+  - `prod + rollback/scale_up`
+- **Ejecución/mock de acciones**
+  - `restart`
+  - `rollback`
+  - `scale_up`
+  - `notify_human`
+  - `no_action`
+- **Matriz con los 7 escenarios preconfigurados**
+
+### Cómo correr los tests
+
+Desde `backend/`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pytest -q
+```
+
+Con cobertura:
+
+```bash
+python -m pytest --cov=src --cov-report=term-missing
+```
+
+### Nota
+
+Los mocks viven solo en `tests/conftest.py`.  
+El backend sigue funcionando con sus integraciones reales cuando se ejecuta normalmente.

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,5 +30,5 @@ class DecisionOut(BaseModel):
 
 
 class ApprovalResolution(BaseModel):
-    resolution_note: str | None = None
+    resolution_note: Optional[str] = None
     resolved_by: str = "human-on-call"
