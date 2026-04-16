@@ -1,6 +1,6 @@
 # Warden IDP Remediation Service API
 
-## 1. Resumen ejecutivo
+## 1. Resumen 
 
 **Warden IDP Remediation Service** es una API diseñada para recibir eventos operativos, analizarlos, tomar una decisión de remediación, aplicar restricciones de seguridad y gobernanza, ejecutar acciones mockeadas cuando sea seguro hacerlo, o escalar la decisión a aprobación humana cuando el riesgo operativo así lo requiera.
 
@@ -29,6 +29,7 @@ Desde la raíz del repositorio:
 
 ```bash
 docker compose up --build
+```
 
 ## Tests automatizados
 
